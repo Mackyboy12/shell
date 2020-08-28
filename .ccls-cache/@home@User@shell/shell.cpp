@@ -1,5 +1,7 @@
 #include <cstring>
+#include <map>
 #include <iostream>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <sys/types.h>
@@ -8,35 +10,47 @@
 #include <vector>
 #include <filesystem>
 #include <errno.h>
-
-std::vector<std::string> Split(std::string input);
+#include <algorithm>
+std::string USERDIR = getenv("HOME");
+std::string ALIASFILE = USERDIR+"/shell/.alias";
+std::vector<std::string> Split(std::string input, char delim);
 void Execute(const char *command, char *arglist[]);
-bool BuiltInCom(const char *command, char *arglist[]);
+std::map<std::string, std::string> alias(std::string file);
+bool BuiltInCom(const char *command, char *arglist[],int arglist_size);
 char** conv(std::vector<std::string> source);
+bool createAlias(std::string first, std::string sec);
+std::string replaceAll(std::string data, std::map <std::string, std::string> dict);
 int main() {
   while (1) {
+    char path[100];
+    getcwd(path, 100);
+    char prompt[110] = "$[";
+    strcat(prompt, path);
+    strcat(prompt,"]: ");
+    std::cout << prompt;
     // Takes input and splits it by space
     std::string input;
-    std::cout << "$: ";
     getline(std::cin, input);
     if(input == "") continue;
-    std::vector<std::string> parsed_string = Split(input);
+    std::map<std::string, std::string> aliasDict = alias(ALIASFILE);
+    input = replaceAll(input, aliasDict);
+    std::vector<std::string> parsed_string = Split(input, ' ');
     // Splits parsed_string into command and arglist
     const char * com = parsed_string.front().c_str();
     char ** arglist = conv(parsed_string);
     // Checks if it is a built in command and if not, execute it
-    if(BuiltInCom(com, arglist) == 0){
+    if(BuiltInCom(com, arglist, parsed_string.size()) == 0){
         Execute(com, arglist);
     }
     delete[] arglist;
   }
 }
 
-std::vector<std::string> Split(std::string input) {
+std::vector<std::string> Split(std::string input, char delim) {
   std::vector<std::string> ret;
   std::istringstream f(input);
   std::string s;
-  while (getline(f, s, ' ')) {
+  while (getline(f, s, delim)) {
     ret.push_back(s);
   }
   return ret;
@@ -64,12 +78,11 @@ void Execute(const char *command, char *arglist[]) {
   }
 }
 
-bool BuiltInCom(const char *command, char ** arglist){
+bool BuiltInCom(const char *command, char ** arglist, int arglist_size){
   if(strcmp(command, "quit") == 0){
     delete[] arglist;
     exit(0);
   } else if(strcmp(command, "cd") == 0){
-    std::cout << "Arglist: " << arglist[1] << std::endl;
     if(chdir(arglist[1]) < 0){
       switch(errno){
         case EACCES:
@@ -101,8 +114,23 @@ bool BuiltInCom(const char *command, char ** arglist){
       return 1;
     }
     return 1;
+  } else if(strcmp(command, "alias") == 0){
+    if(arglist_size < 2){
+      std::cout << "[USAGE] Alias originalName:substituteName" << std::endl;
+      return 1;
+    }
+    std::string strArg(arglist[1]);
+    int numOfSpaces = std::count(strArg.begin(), strArg.end(), ':');
+    if(numOfSpaces){
+      std::vector<std::string> aliasPair = Split(strArg, ':');
+      createAlias(aliasPair.at(0), aliasPair.at(1));
+      return 1;
+    } else {
+      std::cout << "[USAGE] Alias originalName:substituteName" << std::endl;
+      return 1;
+    }
   }
-    return 0;
+  return 0;
 }
 
 char** conv(std::vector<std::string> source){
@@ -110,4 +138,41 @@ char** conv(std::vector<std::string> source){
   for(int i = 0; i < source.size(); i++) dest[i] = (char *)source.at(i).c_str();
   dest[source.size()] = NULL;
   return dest;
+}
+
+
+std::map<std::string, std::string> alias(std::string file){
+  std::map<std::string, std::string> aliasPair;
+  std::string line;
+  std::ifstream aliasFile;
+  aliasFile.open(file);
+  if(aliasFile.is_open()){
+    while(getline(aliasFile, line)){
+      auto pair = Split(line, ':');
+      aliasPair.insert(std::make_pair(pair.at(0), pair.at(1)));
+    }
+  } else {
+    std::cout << "Error: Cannot open alias file\n";
+  }
+  return aliasPair;
+}
+std::string replaceAll(std::string data, std::map <std::string, std::string> dict){
+  for(std::pair <std::string, std::string> entry : dict){
+      size_t start_pos = data.find(entry.first);
+      while(start_pos != std::string::npos){
+        data.replace(start_pos, entry.first.length(),entry.second);
+        start_pos = data.find(entry.first, start_pos + entry.second.size());
+      }
+
+  }
+  return data;
+}
+bool createAlias(std::string first, std::string second){
+    std::ofstream aliasFile;
+    aliasFile.open(ALIASFILE, std::ios_base::app);
+    if(aliasFile.is_open()){
+      aliasFile << first << ":"<< second << std::endl;
+      return true;
+    } else return false;
+
 }
